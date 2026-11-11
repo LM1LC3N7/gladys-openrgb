@@ -831,3 +831,82 @@ test('an Off drops at once the queued request of a command already in its turn',
   assert.ok(at.color - started < 50, `${at.color - started} ms`);
   await t.app.shutdown();
 });
+
+test('"on" never answers done on a state of the cache: turned off in OpenRGB meanwhile, it writes', async () => {
+  const world = fakeOpenRGB();
+  const t = await setup({ world });
+  await t.start();
+  // Off from the OpenRGB window, 3 s after the read: the cache still says on.
+  await t.wait(3 * SECOND);
+  world.controllers[0].colors.fill(0);
+  const before = sentLeds(world).length;
+  const answer = await t.cmd(F(ID, 'light'), 1);
+  assert.equal(answer.success, true);
+  assert.equal(sentLeds(world).length, before + 1);
+  assert.equal(world.controllers[0].colors[0], 0xff0000);
+  // Really on (read now): nothing written, the effect is kept.
+  world.controllers[0].activeMode = 2;
+  const again = await t.cmd(F(ID, 'light'), 1);
+  assert.equal(again.success, true);
+  assert.equal(sentLeds(world).length, before + 1);
+  assert.equal(world.controllers[0].activeMode, 2);
+  await t.app.shutdown();
+});
+
+test('two controllers swapped without a notice: the Off may reach the other, the next reads catch the right one', async () => {
+  const other = controller({
+    name: 'Trident Z',
+    vendor: 'G.Skill',
+    location: 'I2C: /dev/i2c-1, address 0x58',
+  });
+  const world = fakeOpenRGB({ controllers: [controller(), other] });
+  const t = await setup({ world, devices: [created(controller()), created(other)] });
+  await t.start();
+  world.controllers.reverse();
+  const answer = await t.cmd(F(ID, 'light'), 0);
+  // The neighbor got it (collateral), not announced done, kept.
+  assert.equal(answer.success, true);
+  assert.match(JSON.stringify(answer), /renvoyée aux prochaines lectures/);
+  assert.equal(world.controllers[0].colors[0], 0);
+  assert.equal(world.controllers[1].colors[0], 0xff0000);
+  // The confirmation read saw another controller: the cache is dropped, a new Off reads first.
+  const again = await t.cmd(F(ID, 'light'), 0);
+  assert.match(JSON.stringify(again), /lecture le montre/);
+  assert.equal(world.controllers[1].colors[0], 0);
+  assert.deepEqual(t.store.data.guards, []);
+  // Without the second click, the next periodic read does it.
+  world.controllers[1].colors.fill(0xff0000);
+  world.controllers.reverse();
+  world.applyLeds = true;
+  const third = await t.cmd(F(ID, 'light'), 0);
+  assert.match(JSON.stringify(third), /renvoyée/);
+  assert.equal(world.controllers[0].colors[0], 0xff0000);
+  await t.wait(10 * SECOND);
+  assert.equal(world.controllers[1].colors[0], 0);
+  assert.deepEqual(t.store.data.guards, []);
+  await t.app.shutdown();
+});
+
+test('after a list change, 5 Offs on slow controllers: one after the other, the first ones black early', async () => {
+  const controllers = Array.from({ length: 5 }, (_, i) =>
+    controller({ name: `Strip ${i}`, location: `HID: ${i}` }),
+  );
+  const world = fakeOpenRGB({ controllers: [...controllers] });
+  const t = await setup({ world, devices: controllers.map((c) => created(c)) });
+  await t.start();
+  world.latency = 500;
+  world.push(encodePacket(COMMANDS.DEVICE_LIST_UPDATED, 0));
+  const all = Promise.all(
+    controllers.map((c, i) =>
+      t.gladys.fake.setValue(t.gladys.devices[i], { external_id: F(idOf(c), 'light') }, 0),
+    ),
+  );
+  await t.wait(1200);
+  // The first Off read its identity (count, controller) and wrote, before the others read.
+  assert.equal(world.controllers[0].colors[0], 0);
+  const answers = await t.act(all);
+  assert.ok(answers.every((a) => a.success));
+  await t.wait(60 * SECOND);
+  for (const c of world.controllers) assert.equal(c.colors[0], 0);
+  await t.app.shutdown();
+});

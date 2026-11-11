@@ -71,7 +71,14 @@ suivante (plus 5 s), tant qu’OpenRGB ne signale pas que sa liste a changé : u
 scène sur plusieurs contrôleurs part sans une lecture par contrôleur. Les
 commandes passent l’une après l’autre (jamais entremêlées) ; juste après un
 changement de liste, sur un serveur lent, les dernières d’une scène peuvent
-répondre « rien envoyé ».
+répondre « rien envoyé » (les extinctions, elles, partent l’une après l’autre
+et sont gardées). « Allumer » relit toujours l’état avant de décider.
+
+Si OpenRGB change l’ordre de ses contrôleurs sans le signaler, une commande
+peut toucher, jusqu’à la lecture suivante, le contrôleur qui a pris la place :
+une extinction peut ainsi éteindre un voisin. Elle n’est alors pas annoncée
+faite : elle est gardée, et la lecture suivante (ou un nouveau clic) éteint le
+bon contrôleur ; le voisin reste éteint jusqu’à ce que vous le rallumiez.
 
 Un appareil USB rebranché sur un autre port, sans numéro de série, peut donc
 apparaître comme un nouvel appareil dans la Découverte.

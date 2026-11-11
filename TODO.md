@@ -65,7 +65,12 @@ real OpenRGB (no package for Debian 13 on the VM, no RGB hardware).
   window). Commands and profile loads run one at a time up to their writes;
   an Off cancels the waiting ones of its controller (any Off cancels a
   profile). Measured on the fake: 5 colors set at 300, 500 and 900 ms per
-  answer; right after a list change, at 300 ms, 3 or more of 5.
+  answer; right after a list change, at 300 ms, 3 or more of 5. Collateral
+  (review r2): a controller moved without the notice can receive the Off of
+  another until the next read; the Off is not announced done, stays kept,
+  and the next read (or click) reaches the right one; the neighbor stays off.
+  "On" never decides on the cache (fresh read first). Offs whose identity
+  must be read go one at a time up to their writes.
 - **Off and profiles**: a profile load checks no Off came after it was asked
   (global Off counter, before each request); once loaded it ends only the
   resends of Offs asked before it. Offs in /data carry their wall time: older

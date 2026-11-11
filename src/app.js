@@ -89,6 +89,8 @@ export class App {
     this.verified = new Map();
     /** Commands one after the other, each up to its writes (never interleaved). */
     this.chain = Promise.resolve();
+    /** Offs one after the other, each up to its writes. */
+    this.offChain = Promise.resolve();
     this.waiters = new Set();
   }
 
@@ -566,6 +568,10 @@ export class App {
     for (let attempt = 0; ; attempt += 1) {
       const link = this.link;
       if (!link) return 'waiting';
+      // One Off at a time up to its writes: after a list change, the first ones leave early
+      // (never the identity reads of all of them first).
+      // An identity of the cache writes at once (no read): no turn to wait.
+      const done = this.fromCache(link, id) ? () => {} : await this.turn('offChain');
       const release = link.reserve();
       try {
         const at = await this.locate(link, id, PRIORITY.OFF);
@@ -579,6 +585,7 @@ export class App {
           },
         });
         release();
+        done();
         if (!resend) this.logger.info?.(`Off sent to ${id}`);
         const after = await this.confirmRead(link, at.index, id, PRIORITY.OFF);
         if (after && stateOf(after).on === false) {
@@ -591,6 +598,7 @@ export class App {
         return 'waiting';
       } finally {
         release();
+        done();
       }
     }
   }
@@ -598,16 +606,8 @@ export class App {
   /** The controller at its index (identity checked), else found in the whole list. */
   async locate(link, id, priority, extra) {
     if (this.duplicates.has(id)) return undefined;
-    const fresh = this.verified.get(id);
-    if (
-      fresh &&
-      fresh.link === link &&
-      fresh.epoch === link.epoch &&
-      link.version >= 1 &&
-      this.monotonic() - fresh.at <= this.identityFresh()
-    ) {
-      return { index: fresh.index, c: fresh.c };
-    }
+    const cached = this.fromCache(link, id);
+    if (cached) return cached;
     const known = this.controllers.get(id)?.index ?? this.memory?.devices[id]?.index;
     if (known !== undefined) {
       const count = await this.readCount(link, priority, extra);
@@ -622,6 +622,21 @@ export class App {
     }
     const list = await this.readAll(link, priority, extra);
     return list.found.get(id);
+  }
+
+  /** The identity read still valid for this connection and list, or undefined. */
+  fromCache(link, id) {
+    const fresh = this.verified.get(id);
+    if (
+      fresh &&
+      fresh.link === link &&
+      fresh.epoch === link.epoch &&
+      link.version >= 1 &&
+      this.monotonic() - fresh.at <= this.identityFresh()
+    ) {
+      return { index: fresh.index, c: fresh.c, cached: true };
+    }
+    return undefined;
   }
 
   /** How long an identity read serves: until the next periodic read, plus a margin. */
@@ -656,13 +671,13 @@ export class App {
   }
 
   /** Commands one after the other: resolves with the release of the turn. */
-  turn() {
+  turn(chain = 'chain') {
     let release;
     const mine = new Promise((resolve) => {
       release = resolve;
     });
-    const before = this.chain;
-    this.chain = before.then(() => mine);
+    const before = this[chain];
+    this[chain] = before.then(() => mine);
     return before.then(() => release);
   }
 
@@ -791,6 +806,11 @@ export class App {
       try {
         if (!beforeSend()) throw new LinkError('cancelled');
         at = await this.locate(link, id, PRIORITY.COMMAND, extra);
+        if (at?.cached && color === undefined && mode === undefined) {
+          // "On" decides on the state: read now, never the one of the cache.
+          this.verified.delete(id);
+          at = await this.locate(link, id, PRIORITY.COMMAND, extra);
+        }
         if (!at) throw this.refusal(ANSWERS.notFound);
         check = await write(at);
       } finally {
@@ -816,7 +836,10 @@ export class App {
         check = (c) => shortName(c.modes[c.activeMode]?.name ?? '') === mode;
       } else {
         const wanted = color ?? this.memory?.devices[id]?.color ?? before.color ?? WHITE;
-        if (color === undefined && before.on === true) return this.text(ANSWERS.confirmed);
+        // "Already on" only from a read of this command: a state in the cache may be old.
+        if (color === undefined && !at.cached && before.on === true) {
+          return this.text(ANSWERS.confirmed);
+        }
         const opts = { ...extra, index: at.index, priority: PRIORITY.COMMAND, sent };
         await link.request(P.setCustomMode(at.index), opts);
         await link.request(P.updateLeds(at.index, at.c.ledCount, wanted), opts);

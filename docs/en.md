@@ -68,7 +68,14 @@ connection until the next periodic read (plus 5 s), as long as OpenRGB does not
 say its list changed: a scene on several controllers leaves without one read
 per controller. Commands go one after the other (never interleaved); right
 after a list change, on a slow server, the last ones of a scene may answer
-"nothing sent".
+"nothing sent" (Offs go one after the other and are kept). "On" always reads
+the state before deciding.
+
+If OpenRGB reorders its controllers without saying so, a command may reach,
+until the next read, the controller that took the place: an Off may thus turn
+a neighbor off. It is then not announced done: it is kept, and the next read
+(or a new click) turns the right controller off; the neighbor stays off until
+you turn it back on.
 
 A USB device without a serial plugged into another port may thus show up as a
 new device in Discover.

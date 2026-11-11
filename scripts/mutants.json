@@ -252,5 +252,31 @@
     "file": "src/store.js",
     "from": "if (at === undefined || at > now || now - at > TIMINGS.guardMaxAge) continue;",
     "to": "if (at === undefined || at > now) continue;"
+  },
+  {
+    "name": "on: done on a state of the cache",
+    "file": "src/app.js",
+    "from": "        if (at?.cached && color === undefined && mode === undefined) {",
+    "to": "        if (false) {"
+  },
+  {
+    "name": "on: shortcut taken on a cached state",
+    "file": "src/app.js",
+    "from": "if (color === undefined && !at.cached && before.on === true) {",
+    "to": "if (color === undefined && before.on === true) {",
+    "equivalent": true,
+    "why": "an \"on\" whose identity came from the cache reads the controller again before write() (mutant 42 covers that read), so at.cached is never true there; kept as a second check."
+  },
+  {
+    "name": "confirmation read of another controller keeps the cache",
+    "file": "src/app.js",
+    "from": "      if (controllerId(c) !== id) {\n        this.verified.delete(id);",
+    "to": "      if (controllerId(c) !== id) {"
+  },
+  {
+    "name": "Offs interleaved (no Off chain)",
+    "file": "src/app.js",
+    "from": "      const done = this.fromCache(link, id) ? () => {} : await this.turn('offChain');",
+    "to": "      const done = () => {};"
   }
 ]
