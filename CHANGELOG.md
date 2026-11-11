@@ -10,7 +10,12 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-11
+
 ### Added
 
 - First version: the controllers of an OpenRGB SDK server as lights (on / off,
   color, effect mode), the OpenRGB profiles, the connection test.
+
+[Unreleased]: https://github.com/LM1LC3N7/gladys-openrgb/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-openrgb/releases/tag/v0.1.1
