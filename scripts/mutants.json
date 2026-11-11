@@ -1,0 +1,206 @@
+[
+  {
+    "name": "Off: queued commands of the controller not cancelled",
+    "file": "src/app.js",
+    "from": "this.link?.cancel((job) => job.target === id && job.priority !== PRIORITY.OFF);",
+    "to": "this.link?.cancel(() => false);"
+  },
+  {
+    "name": "command: no check that an Off came after it, just before sending",
+    "file": "src/app.js",
+    "from": "      (this.offSeq.get(id) ?? 0) === seq &&",
+    "to": "      true &&"
+  },
+  {
+    "name": "mode option not checked again before sending",
+    "file": "src/app.js",
+    "from": "      (mode === undefined || this.config?.allowModes === true);",
+    "to": "      true;"
+  },
+  {
+    "name": "mode option not checked",
+    "file": "src/app.js",
+    "from": "if (mode !== undefined && !this.config.allowModes) throw this.refusal(ANSWERS.modesOff);",
+    "to": ""
+  },
+  {
+    "name": "profile option not checked",
+    "file": "src/app.js",
+    "from": "if (!this.config.allowProfiles) throw this.refusal(ANSWERS.profilesOff);",
+    "to": ""
+  },
+  {
+    "name": "identity: the controller at the known index not checked",
+    "file": "src/app.js",
+    "from": "if (controllable(c) && controllerId(c) === id) return { index: known, c };",
+    "to": "if (controllable(c)) return { index: known, c };"
+  },
+  {
+    "name": "identity: a duplicate written",
+    "file": "src/app.js",
+    "from": "    if (this.duplicates.has(id)) return undefined;\n",
+    "to": ""
+  },
+  {
+    "name": "identity: duplicates not detected",
+    "file": "src/app.js",
+    "from": "if (byId.has(id) || dupes.has(id)) {",
+    "to": "if (false) {"
+  },
+  {
+    "name": "Off resent one time too many",
+    "file": "src/app.js",
+    "from": "if (guard.resends >= TIMINGS.offResends) {",
+    "to": "if (guard.resends > TIMINGS.offResends) {"
+  },
+  {
+    "name": "Off resends not ended by a newer command that left",
+    "file": "src/app.js",
+    "from": "      if (!flow.sent) this.dropGuard(id);",
+    "to": ""
+  },
+  {
+    "name": "Off resends not ended when a read shows it",
+    "file": "src/app.js",
+    "from": "if (seen && stateOf(seen.c).on === false) {",
+    "to": "if (false) {"
+  },
+  {
+    "name": "Off sent at the priority of the reads",
+    "file": "src/app.js",
+    "from": "const extra = { priority: PRIORITY.OFF, target: id, index: at.index };",
+    "to": "const extra = { priority: PRIORITY.READ, target: id, index: at.index };"
+  },
+  {
+    "name": "a stalled read never cut by an Off",
+    "file": "src/openrgb/client.js",
+    "from": "if (this.monotonic() - this.lastByteAt >= TIMINGS.stall) {",
+    "to": "if (false) {"
+  },
+  {
+    "name": "queue: priority ignored",
+    "file": "src/openrgb/client.js",
+    "from": "let at = this.queue.findIndex((j) => j.priority > priority);",
+    "to": "let at = -1;"
+  },
+  {
+    "name": "packet size not bounded before its body",
+    "file": "src/openrgb/protocol.js",
+    "from": "if (length > LIMITS.packetBytes) throw new ProtocolError('packet too large');",
+    "to": ""
+  },
+  {
+    "name": "an answer taken whatever its packet id",
+    "file": "src/openrgb/client.js",
+    "from": "if (job && job.expect === header.command && job.index === header.index) {",
+    "to": "if (job) {"
+  },
+  {
+    "name": "controller body: size field not checked",
+    "file": "src/openrgb/protocol.js",
+    "from": "  if (size !== body.length) throw new ProtocolError('size does not match');\n  const controller",
+    "to": "  const controller"
+  },
+  {
+    "name": "controller body: bytes left accepted",
+    "file": "src/openrgb/protocol.js",
+    "from": "if (r.at !== body.length) throw new ProtocolError('bytes left after the controller');",
+    "to": ""
+  },
+  {
+    "name": "reader: no bound check",
+    "file": "src/openrgb/protocol.js",
+    "from": "if (this.at + n > this.buffer.length) throw new ProtocolError('body ends early');",
+    "to": ""
+  },
+  {
+    "name": "restart reads at once",
+    "file": "src/app.js",
+    "from": "const wait = last === undefined ? 0 : Math.max(0, Math.min(interval, last + interval - wall));",
+    "to": "const wait = 0;"
+  },
+  {
+    "name": "configuration saved unchanged reads again",
+    "file": "src/app.js",
+    "from": "    if (same && (this.timer.poll || this.polling)) return;\n",
+    "to": ""
+  },
+  {
+    "name": "time of the attempt not in /data",
+    "file": "src/app.js",
+    "from": "        this.memory.lastAttemptAt = this.now();\n",
+    "to": ""
+  },
+  {
+    "name": "unread /data overwritten",
+    "file": "src/app.js",
+    "from": "    if (!this.memory) return false;\n    let timer;",
+    "to": "    let timer;"
+  },
+  {
+    "name": "failed reads not spaced",
+    "file": "src/app.js",
+    "from": "wait = Math.min(interval * 2 ** Math.min(this.failures - 1, 10), TIMINGS.backoffMax);",
+    "to": "wait = interval;"
+  },
+  {
+    "name": "command budget not kept",
+    "file": "src/app.js",
+    "from": "timer = this.timers.setTimeout(() => resolve(late), TIMINGS.command);",
+    "to": "timer = this.timers.setTimeout(() => resolve(late), TIMINGS.command * 100);"
+  },
+  {
+    "name": "states per minute not bounded",
+    "file": "src/app.js",
+    "from": "const room = Math.max(0, TIMINGS.statesPerMinute - this.published.length);",
+    "to": "const room = states.length;"
+  },
+  {
+    "name": "published values not forgotten at a new connection",
+    "file": "src/app.js",
+    "from": "    this.gladys.forgetPublishedStates?.();\n",
+    "to": ""
+  },
+  {
+    "name": "Off from /data not sent before the configuration",
+    "file": "src/app.js",
+    "from": "      this.resendOffs(gen);\n",
+    "to": ""
+  },
+  {
+    "name": "confirmation: a color taken as done without the read",
+    "file": "src/app.js",
+    "from": "return this.text(after && check(after) ? ANSWERS.confirmed : ANSWERS.unconfirmed);",
+    "to": "return this.text(ANSWERS.confirmed);"
+  },
+  {
+    "name": "commands not capped",
+    "file": "src/app.js",
+    "from": "if (this.activeCommands >= LIMITS.commands) throw this.refusal(ANSWERS.busy);",
+    "to": ""
+  },
+  {
+    "name": "too many controllers accepted",
+    "file": "src/app.js",
+    "from": "if (count > LIMITS.controllers) throw new LinkError('protocol', 'too many controllers');",
+    "to": ""
+  },
+  {
+    "name": "Off does not hold the connection between its requests",
+    "file": "src/app.js",
+    "from": "      const release = link.reserve();",
+    "to": "      const release = () => {};"
+  },
+  {
+    "name": "held connection: other jobs leave anyway",
+    "file": "src/openrgb/client.js",
+    "from": "const at = this.holds > 0 ? this.queue.findIndex((j) => j.priority === PRIORITY.OFF) : 0;",
+    "to": "const at = 0;"
+  },
+  {
+    "name": "restart: the button or Discovery reads sooner",
+    "file": "src/app.js",
+    "from": "    return last === undefined || this.now() - last >= interval;",
+    "to": "    return true;"
+  }
+]

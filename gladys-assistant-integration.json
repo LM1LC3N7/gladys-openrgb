@@ -1,177 +1,134 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "OpenRGB",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "The RGB lighting of your computer through OpenRGB: on, off, color, effects, profiles.",
+    "fr": "L’éclairage RGB de votre ordinateur par OpenRGB : allumer, éteindre, couleur, effets, profils."
   },
-  "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-openrgb:0.1.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-openrgb/main/cover.png",
+  "categories": ["lighting"],
+  "transports": ["local"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
-      "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+      "label": {
+        "en": "Your OpenRGB server",
+        "fr": "Votre serveur OpenRGB"
       },
-      "links": [
+      "description": {
+        "en": "Brings into Gladys the RGB devices OpenRGB drives on a computer (motherboard, RAM, graphics card, fans, LED strips, keyboard, mouse…), through the SDK server of OpenRGB on your network: each one becomes a light (on / off, color) with its effect mode. Start the SDK server in OpenRGB (SDK Server tab, or openrgb --server). It has no password: anyone on your network can drive it, keep it on a trusted network. Turning off needs no option and goes first. Effect modes and profiles change only once you allow them below. The integration never asks a device to save its settings (some keep their last mode on their own). Never tested with a real device: tell us on the forum how it goes. Not affiliated with OpenRGB.",
+        "fr": "Intègre à Gladys les appareils RGB qu’OpenRGB pilote sur un ordinateur (carte mère, RAM, carte graphique, ventilateurs, rubans LED, clavier, souris…), par le serveur SDK d’OpenRGB sur votre réseau : chacun devient une lumière (allumer / éteindre, couleur) avec son mode d’effet. Démarrez le serveur SDK dans OpenRGB (onglet SDK Server, ou openrgb --server). Il n’a pas de mot de passe : tout appareil de votre réseau peut le piloter, gardez-le sur un réseau de confiance. Éteindre ne demande aucune option et passe en premier. Modes d’effet et profils ne changent que si vous les autorisez ci-dessous. L’intégration ne demande jamais à un appareil d’enregistrer ses réglages (certains gardent seuls leur dernier mode). Jamais testé avec un vrai appareil : dites-nous sur le forum comment ça se passe. Sans lien avec OpenRGB."
+      }
+    },
+    {
+      "key": "server",
+      "type": "string",
+      "label": {
+        "en": "Address of the OpenRGB computer",
+        "fr": "Adresse de l’ordinateur OpenRGB"
+      },
+      "description": {
+        "en": "The IP address (or name) of the computer running OpenRGB, with :port only if the SDK server does not listen on 6742. Give that computer a fixed address in your router.",
+        "fr": "L’adresse IP (ou le nom) de l’ordinateur où tourne OpenRGB, avec :port seulement si le serveur SDK n’écoute pas sur le 6742. Donnez à cet ordinateur une adresse fixe dans votre box."
+      },
+      "placeholder": {
+        "en": "192.168.1.20",
+        "fr": "192.168.1.20"
+      },
+      "required": true
+    },
+    {
+      "key": "poll_interval",
+      "type": "number",
+      "label": {
+        "en": "Read every (seconds)",
+        "fr": "Lecture toutes les (secondes)"
+      },
+      "description": {
+        "en": "How often the devices are read: 10 s by default, 5 s at least.",
+        "fr": "Fréquence de lecture des appareils : 10 s par défaut, 5 s au moins."
+      },
+      "required": false,
+      "default": 10,
+      "min": 5,
+      "max": 300
+    },
+    {
+      "key": "allow_modes",
+      "type": "boolean",
+      "label": {
+        "en": "Allow the effect modes",
+        "fr": "Autoriser les modes d’effet"
+      },
+      "description": {
+        "en": "Lets Gladys switch a device to another of its effect modes (rainbow, breathing…). Off by default: the mode is shown, not changed.",
+        "fr": "Permet à Gladys de passer un appareil sur un autre de ses modes d’effet (arc-en-ciel, respiration…). Désactivé par défaut : le mode est affiché, pas changé."
+      },
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "allow_profiles",
+      "type": "boolean",
+      "label": {
+        "en": "Allow loading the profiles",
+        "fr": "Autoriser le chargement des profils"
+      },
+      "description": {
+        "en": "Lets Gladys load a profile saved in OpenRGB (it sets every device at once). Off by default. Profiles are never saved nor deleted.",
+        "fr": "Permet à Gladys de charger un profil enregistré dans OpenRGB (il règle tous les appareils d’un coup). Désactivé par défaut. Les profils ne sont jamais enregistrés ni supprimés."
+      },
+      "required": false,
+      "default": false
+    },
+    {
+      "key": "language",
+      "type": "select",
+      "label": {
+        "en": "Language of the names",
+        "fr": "Langue des noms"
+      },
+      "description": {
+        "en": "Used for the names of the features added from now on.",
+        "fr": "Sert aux noms des fonctionnalités ajoutées désormais."
+      },
+      "required": false,
+      "default": "fr",
+      "options": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "value": "fr",
+          "label": {
+            "en": "French",
+            "fr": "Français"
+          }
+        },
+        {
+          "value": "en",
+          "label": {
+            "en": "English",
+            "fr": "Anglais"
+          }
         }
       ]
-    },
-    {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
-      "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
-      },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
-    },
-    {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
-      "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
-      },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
-    },
-    {
-      "key": "unit",
-      "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
-      "required": false,
-      "default": "celsius",
-      "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
-      ]
-    },
-    {
-      "key": "poll_frequency",
-      "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
-      "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
-      },
-      "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
+      "key": "test_connection",
+      "label": {
+        "en": "Test the connection",
+        "fr": "Tester la connexion"
+      },
+      "description": {
+        "en": "Reads the OpenRGB server (or shows its last read, if it was read less than an interval ago).",
+        "fr": "Lit le serveur OpenRGB (ou montre sa dernière lecture, s’il a été lu il y a moins d’un intervalle)."
+      },
       "timeout_seconds": 30
-    },
-    {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
-    }
-  ],
-  "scene_triggers": [
-    {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
-      "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
-      },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
-        },
-        {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
-        }
-      ],
-      "variables": [
-        {
-          "key": "target",
-          "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
-        }
-      ]
-    }
-  ],
-  "scene_actions": [
-    {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
-      },
-      "timeout_seconds": 15,
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
-        }
-      ]
-    }
-  ],
-  "widgets": [
-    {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
-      },
-      "icon": "activity",
-      "action_timeout_seconds": 15
     }
   ]
 }

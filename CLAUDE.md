@@ -15,7 +15,7 @@ its only runtime dependency. It started from the official JavaScript template.
 
 ```bash
 npm install
-npm test                                  # node --test, the built-in runner
+npm test                                  # node --test --test-timeout=60000
 node --test test/devices.test.js          # one file
 node --test --test-name-pattern "plug"    # tests whose name matches
 npm run lint                              # ESLint
@@ -32,16 +32,18 @@ pushing.
 
 ```
 index.js                          SDK wiring only: handlers registered before connect()
-src/devices/index.js              registry of the device blueprints + dispatch helpers
-src/devices/<type>.js             one device type per file (buildDevice, onPoll, onSetValue...)
-src/scenes.js                     scene action handlers (manifest `scene_actions`)
-src/widgets.js                    dashboard widget handlers (manifest `widgets`)
-src/config.js                     DEFAULT_CONFIG (mirrors the manifest defaults) + normalization
-src/weather.js                    example driver (Open-Meteo)
+src/handlers.js                   the SDK handlers -> the App (shared with the tests)
+src/app.js                        reads, states, commands, Offs kept and resent, status
+src/openrgb/client.js             one TCP connection, one request in flight, priorities, cut
+src/openrgb/protocol.js           packets and bodies of the OpenRGB SDK protocol, bounded
+src/model.js                      controller -> id, Gladys device, states (pure)
+src/config.js                     DEFAULTS (mirror the manifest) + normalization
+src/store.js                      /data file (bounded, atomic) + memory format
+src/i18n.js                       texts in English and French
 gladys-assistant-integration.json manifest: name, config_schema, actions, image...
 docs/en.md, docs/fr.md            user documentation, re-hosted by Gladys (mandatory)
-test/                             node --test, against the SDK's fake Gladys (integration-sdk/testing)
-.github/scripts/release.mjs       release helpers (manifest bump, changelog), tested in test/
+test/                             node --test: fake Gladys of the SDK, fake OpenRGB server
+test/kit/                         copied from gladys-testkit (clocks, TCP server)
 ```
 
 ## Rules
@@ -73,4 +75,11 @@ test/                             node --test, against the SDK's fake Gladys (in
 - **User-facing text** is bilingual (English and French): action messages,
   manifest texts, and `docs/en.md` / `docs/fr.md`, kept in sync.
 - **Style.** Prettier formats, ESLint catches mistakes. Comments explain why,
-  in English. Tests never touch the network.
+  in English. Tests never leave 127.0.0.1.
+- **OpenRGB is GPL-2.0**: never read nor copy its code; only its network
+  protocol is spoken. The layouts come from openrgb-sdk (MIT, see
+  `THIRD_PARTY_NOTICES.md`).
+- **Off** is never refused for an option, an unread configuration or a read in
+  progress; nothing is ever saved to a device or to the profiles (no
+  `SAVE_MODE`, `SAVE_PROFILE`, `DELETE_PROFILE`). Modes and profiles stay
+  behind their options. See `TODO.md` "Decisions".

@@ -1,0 +1,198 @@
+// -----------------------------------------------------------------------------
+// What must survive a restart, in /data (the only writable place of the
+// container), bounded and checked when read back:
+//   - the address of the OpenRGB server last read (an Off can leave before the
+//     configuration is read) and the time of the last read attempt (a restart
+//     never reads sooner);
+//   - per controller (its id, see src/model.js): its index on the server when
+//     last read and the color it last showed on (what "on" lights again);
+//   - the Offs to send again (guards): the controller, how many times they
+//     were sent again.
+// Nothing else (no name, no serial). A small JSON file, written
+// through a temporary file and a rename, one save after the other (never
+// stuck behind one that hangs), readable by the container user only (0600).
+// Only a plain file is read (a FIFO would never end, a link points
+// elsewhere). The app bounds every read and save of it (src/app.js): a /data
+// that does not answer is unreadable or not written, never a wait.
+// -----------------------------------------------------------------------------
+
+import * as fsPromises from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { LIMITS, TIMINGS } from './constants.js';
+import { addressOf } from './config.js';
+import { isId } from './model.js';
+
+export const STATE_FILE = '/data/openrgb-state.json';
+export const FORMAT = 1;
+/** A larger file is not ours: refused (read bounded). */
+const MAX_STATE_BYTES = 128 * 1024;
+
+/**
+ * The /data file. Saves go one after the other, but a save never waits more than
+ * `queueWait` for the one before it (a frozen fsync, say): it then writes through a
+ * temporary file of its own, and an older write that ends after a newer one is in place
+ * drops its file instead of renaming it over the newer state. Taken from gladys-ipx800
+ * 0.1.3; the read refuses what is not a plain file.
+ */
+export function fileStore(
+  path = STATE_FILE,
+  { fs = fsPromises, timers = globalThis, queueWait = TIMINGS.storeWait } = {},
+) {
+  let previous = Promise.resolve();
+  let count = 0;
+  let placed = 0;
+  let sharedBusy = false;
+  let renames = Promise.resolve();
+  return {
+    /** null when there is no file (a fresh install); throws when it cannot be read or parsed. */
+    async load() {
+      let stats;
+      try {
+        stats = await fs.lstat(path);
+      } catch (err) {
+        if (err?.code === 'ENOENT') return null;
+        throw err;
+      }
+      if (!stats.isFile()) throw Object.assign(new Error('not a plain file'), { code: 'EFTYPE' });
+      if (stats.size > MAX_STATE_BYTES) throw new Error('state file too large');
+      // Opened without blocking (a FIFO put there meanwhile would hold the open), checked again.
+      const file = await fs.open(path, constants.O_RDONLY | constants.O_NONBLOCK);
+      try {
+        const again = await file.stat();
+        if (!again.isFile()) throw Object.assign(new Error('not a plain file'), { code: 'EFTYPE' });
+        if (again.size > MAX_STATE_BYTES) throw new Error('state file too large');
+        const text = await file.readFile('utf8');
+        if (Buffer.byteLength(text) > MAX_STATE_BYTES) throw new Error('state file too large');
+        return JSON.parse(text);
+      } finally {
+        await file.close();
+      }
+    },
+    save(data) {
+      const text = JSON.stringify(data);
+      const seq = ++count;
+      const before = previous;
+      const write = (async () => {
+        let timer;
+        await Promise.race([
+          before,
+          new Promise((resolve) => {
+            timer = timers.setTimeout(resolve, queueWait);
+          }),
+        ]);
+        timers.clearTimeout(timer);
+        const shared = !sharedBusy;
+        if (shared) sharedBusy = true;
+        const temporary = shared ? `${path}.tmp` : `${path}.tmp-${seq}`;
+        try {
+          const file = await openTemporary(fs, temporary);
+          try {
+            await file.writeFile(text, 'utf8');
+            await file.sync();
+          } finally {
+            await file.close();
+          }
+          // The renames one after the other, in order: an older write never lands after a newer
+          // one is in place (it drops its file instead).
+          const step = renames.then(async () => {
+            if (seq < placed) {
+              await fs.unlink(temporary).catch(() => {});
+              return;
+            }
+            await fs.rename(temporary, path);
+            placed = seq;
+          });
+          renames = step.catch(() => {});
+          await step;
+        } finally {
+          if (shared) sharedBusy = false;
+        }
+      })();
+      previous = write.catch(() => {});
+      return write;
+    },
+  };
+}
+
+/**
+ * The temporary file, created anew: never through a link, never blocking on a FIFO or a
+ * device left there (O_EXCL | O_NOFOLLOW | O_NONBLOCK); whatever was there is removed first.
+ */
+async function openTemporary(fs, temporary) {
+  const flags =
+    constants.O_WRONLY |
+    constants.O_CREAT |
+    constants.O_EXCL |
+    constants.O_NOFOLLOW |
+    constants.O_NONBLOCK;
+  try {
+    return await fs.open(temporary, flags, 0o600);
+  } catch (err) {
+    if (err?.code !== 'EEXIST') throw err;
+    await fs.unlink(temporary);
+    return fs.open(temporary, flags, 0o600);
+  }
+}
+
+/** The same in memory (tests). `fail`: the next saves throw; `unreadable`: load throws; `hang`: never answers. */
+export function memoryStore(initial = null) {
+  return {
+    data: initial,
+    saves: 0,
+    fail: false,
+    unreadable: false,
+    hang: false,
+    hangLoad: false,
+    async load() {
+      if (this.hangLoad) return new Promise(() => {});
+      if (this.unreadable) throw Object.assign(new Error('EIO'), { code: 'EIO' });
+      return this.data === null ? null : structuredClone(this.data);
+    },
+    async save(data) {
+      if (this.hang) return new Promise(() => {});
+      if (this.fail) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' });
+      this.saves += 1;
+      this.data = structuredClone(data);
+    },
+  };
+}
+
+const time = (value) => (Number.isFinite(value) && value > 0 ? value : undefined);
+const plain = (value) => value && typeof value === 'object' && !Array.isArray(value);
+const color = (value) =>
+  Number.isInteger(value) && value > 0 && value <= 0xffffff ? value : undefined;
+
+/** An empty memory. */
+export const emptyMemory = () => ({ format: FORMAT, devices: {}, guards: [] });
+
+/** The persisted state, repaired; a time in the future is invalid (dropped). */
+export function normalizeMemory(raw, now = Date.now()) {
+  const memory = emptyMemory();
+  if (!plain(raw)) return memory;
+  if (addressOf(raw.address)) memory.address = raw.address;
+  const last = time(raw.lastAttemptAt);
+  if (last !== undefined && last <= now) memory.lastAttemptAt = last;
+  if (plain(raw.devices)) {
+    for (const [id, entry] of Object.entries(raw.devices).slice(0, LIMITS.remembered)) {
+      if (!isId(id) || !plain(entry)) continue;
+      const out = {};
+      if (Number.isInteger(entry.index) && entry.index >= 0 && entry.index < LIMITS.controllers) {
+        out.index = entry.index;
+      }
+      if (color(entry.color)) out.color = entry.color;
+      memory.devices[id] = out;
+    }
+  }
+  if (Array.isArray(raw.guards)) {
+    const seen = new Set();
+    for (const entry of raw.guards.slice(0, LIMITS.guards)) {
+      if (!plain(entry) || !isId(entry.id) || seen.has(entry.id)) continue;
+      seen.add(entry.id);
+      const resends = Number.isInteger(entry.resends)
+        ? Math.min(Math.max(entry.resends, 0), 99)
+        : 0;
+      memory.guards.push({ id: entry.id, resends });
+    }
+  }
+  return memory;
+}
