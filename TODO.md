@@ -69,7 +69,10 @@ real OpenRGB (no package for Debian 13 on the VM, no RGB hardware).
   (review r2): a controller moved without the notice can receive the Off of
   another until the next read; the Off is not announced done, stays kept,
   and the next read (or click) reaches the right one; the neighbor stays off.
-  "On" never decides on the cache (fresh read first). Offs whose identity
+  "On" never decides on the cache (fresh read first): a scene turning several
+  slow controllers on may set only some (review r3 measured 3, 2, 1 of 5 at
+  300, 500, 900 ms, with or without a list change); the docs advise spacing
+  these actions in the scene. Offs whose identity
   must be read go one at a time up to their writes.
 - **Off and profiles**: a profile load checks no Off came after it was asked
   (global Off counter, before each request); once loaded it ends only the

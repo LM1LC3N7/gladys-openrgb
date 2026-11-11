@@ -72,7 +72,12 @@ scène sur plusieurs contrôleurs part sans une lecture par contrôleur. Les
 commandes passent l’une après l’autre (jamais entremêlées) ; juste après un
 changement de liste, sur un serveur lent, les dernières d’une scène peuvent
 répondre « rien envoyé » (les extinctions, elles, partent l’une après l’autre
-et sont gardées). « Allumer » relit toujours l’état avant de décider.
+et sont gardées). « Allumer » relit toujours l’état avant de décider : une
+scène qui allume plusieurs contrôleurs sur un serveur lent peut n’en régler que
+certains, même sans changement de liste (mesuré : 3, 2 ou 1 sur 5 avec des
+réponses en 300, 500 ou 900 ms ; les autres répondent « rien envoyé »).
+Espacez ces actions dans la scène (une attente d’une à deux secondes entre
+deux allumages).
 
 Si OpenRGB change l’ordre de ses contrôleurs sans le signaler, une commande
 peut toucher, jusqu’à la lecture suivante, le contrôleur qui a pris la place :

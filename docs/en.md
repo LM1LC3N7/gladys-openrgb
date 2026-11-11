@@ -69,7 +69,11 @@ say its list changed: a scene on several controllers leaves without one read
 per controller. Commands go one after the other (never interleaved); right
 after a list change, on a slow server, the last ones of a scene may answer
 "nothing sent" (Offs go one after the other and are kept). "On" always reads
-the state before deciding.
+the state before deciding: a scene turning several controllers on with a slow
+server may set only some of them, even without a list change (measured: 3, 2
+or 1 of 5 with answers in 300, 500 or 900 ms; the others answer "nothing
+sent"). Space these actions in the scene (a wait of one to two seconds
+between two "on").
 
 If OpenRGB reorders its controllers without saying so, a command may reach,
 until the next read, the controller that took the place: an Off may thus turn
