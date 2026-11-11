@@ -55,6 +55,8 @@ export class Link {
     this.buffer = Buffer.alloc(0);
     this.lastByteAt = 0;
     this.holds = 0;
+    /** Changes with every connection and every DEVICE_LIST_UPDATED: the indexes may have moved. */
+    this.epoch = 0;
   }
 
   /**
@@ -213,6 +215,7 @@ export class Link {
       });
       this.socket = socket;
       this.ended = ended;
+      this.epoch += 1;
       // The version: an old server (protocol 0) never answers it.
       this.version = 0;
       try {
@@ -286,6 +289,7 @@ export class Link {
       const body = this.buffer.subarray(HEADER_SIZE, HEADER_SIZE + header.length);
       this.buffer = this.buffer.subarray(HEADER_SIZE + header.length);
       if (header.command === COMMANDS.DEVICE_LIST_UPDATED) {
+        this.epoch += 1;
         this.onListChanged?.();
         continue;
       }
@@ -300,6 +304,7 @@ export class Link {
   /** The connection is gone: the request in flight fails, the queue stays for the next one. */
   lost(err) {
     const job = this.inflight;
+    this.epoch += 1;
     this.socket = undefined;
     this.buffer = Buffer.alloc(0);
     if (job) job.finish(job.reject, err);

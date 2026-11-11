@@ -2,8 +2,8 @@
   {
     "name": "Off: queued commands of the controller not cancelled",
     "file": "src/app.js",
-    "from": "this.link?.cancel((job) => job.target === id && job.priority !== PRIORITY.OFF);",
-    "to": "this.link?.cancel(() => false);"
+    "from": "        (job.target === id || job.target === PROFILE_TARGET) && job.priority !== PRIORITY.OFF,",
+    "to": "        false,"
   },
   {
     "name": "command: no check that an Off came after it, just before sending",
@@ -32,8 +32,8 @@
   {
     "name": "identity: the controller at the known index not checked",
     "file": "src/app.js",
-    "from": "if (controllable(c) && controllerId(c) === id) return { index: known, c };",
-    "to": "if (controllable(c)) return { index: known, c };"
+    "from": "if (controllable(c) && controllerId(c) === id) {",
+    "to": "if (controllable(c)) {"
   },
   {
     "name": "identity: a duplicate written",
@@ -202,5 +202,55 @@
     "file": "src/app.js",
     "from": "    return last === undefined || this.now() - last >= interval;",
     "to": "    return true;"
+  },
+  {
+    "name": "profile option not checked again before sending",
+    "file": "src/app.js",
+    "from": "      link === this.link &&\n      this.config?.allowProfiles === true;",
+    "to": "      link === this.link;"
+  },
+  {
+    "name": "profile: an Off asked after it does not stop it",
+    "file": "src/app.js",
+    "from": "      this.offCount === offs &&",
+    "to": "      true &&"
+  },
+  {
+    "name": "profile load clears the guards of newer Offs",
+    "file": "src/app.js",
+    "from": "if ((guard.offAt ?? 0) <= offs) this.dropGuard(guard.id);",
+    "to": "this.dropGuard(guard.id);",
+    "equivalent": true,
+    "why": "beforeSend refuses the load when an Off came after it (offCount), so no guard newer than the load exists when sent() runs; kept as a second check."
+  },
+  {
+    "name": "commands interleaved (no turn)",
+    "file": "src/app.js",
+    "from": "      const release = await this.takeTurn(id);",
+    "to": "      const release = () => {};"
+  },
+  {
+    "name": "identity read serves every write (no freshness)",
+    "file": "src/app.js",
+    "from": "this.monotonic() - fresh.at <= this.identityFresh()",
+    "to": "true"
+  },
+  {
+    "name": "identity read survives a list update",
+    "file": "src/app.js",
+    "from": "      fresh.epoch === link.epoch &&",
+    "to": ""
+  },
+  {
+    "name": "a waiting command not given up at an Off",
+    "file": "src/app.js",
+    "from": "        waiter.cancel(new LinkError('cancelled'));",
+    "to": ""
+  },
+  {
+    "name": "old Off of /data sent again at a start",
+    "file": "src/store.js",
+    "from": "if (at === undefined || at > now || now - at > TIMINGS.guardMaxAge) continue;",
+    "to": "if (at === undefined || at > now) continue;"
   }
 ]

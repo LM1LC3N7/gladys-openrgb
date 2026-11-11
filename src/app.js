@@ -45,6 +45,8 @@ import * as P from './openrgb/protocol.js';
 import { fileStore, normalizeMemory } from './store.js';
 
 const WHITE = 0xffffff;
+/** The tag of the jobs of a profile load (cancelled by any Off). */
+const PROFILE_TARGET = 'profile';
 
 /** A refusal: nothing was sent. */
 class Refusal extends Error {}
@@ -81,6 +83,13 @@ export class App {
     this.storeLoading = false;
     this.polling = undefined;
     this.activeCommands = 0;
+    /** Offs asked since the start (a profile load checks none came after it). */
+    this.offCount = 0;
+    /** id -> { index, c, epoch, at, link }: the last identity read of each controller. */
+    this.verified = new Map();
+    /** Commands one after the other, each up to its writes (never interleaved). */
+    this.chain = Promise.resolve();
+    this.waiters = new Set();
   }
 
   get language() {
@@ -371,6 +380,8 @@ export class App {
   /** Every controller: `{ found: Map(id -> { index, c }), skipped }`; the doubles left out. */
   async readAll(link, priority, extra) {
     const count = await this.readCount(link, priority, extra);
+    // Taken once connected (a connection is an epoch of its own).
+    const epoch = link.epoch;
     const byId = new Map();
     const dupes = new Set();
     let skipped = 0;
@@ -390,6 +401,11 @@ export class App {
       byId.set(id, { index, c });
     }
     skipped += [...dupes].length;
+    for (const id of dupes) this.verified.delete(id);
+    // Valid only if the list did not change while it was read.
+    if (link.epoch === epoch) {
+      for (const [id, { index, c }] of byId) this.verify(link, id, index, c, epoch);
+    }
     if (link === this.link) {
       this.controllers = byId;
       this.duplicates = dupes;
@@ -479,14 +495,21 @@ export class App {
     if (this.memory) {
       if (!this.memory.guards.some((g) => g.id === id)) {
         if (this.memory.guards.length >= LIMITS.guards) this.memory.guards.shift();
-        this.memory.guards.push({ id, resends: 0 });
+        this.memory.guards.push({ id, resends: 0, offAt: this.offCount, at: this.now() });
       } else {
-        this.memory.guards.find((g) => g.id === id).resends = 0;
+        Object.assign(
+          this.memory.guards.find((g) => g.id === id),
+          {
+            resends: 0,
+            offAt: this.offCount,
+            at: this.now(),
+          },
+        );
       }
       this.save();
     } else {
       this.guards ??= new Map();
-      this.guards.set(id, { id, resends: 0 });
+      this.guards.set(id, { id, resends: 0, offAt: this.offCount });
     }
   }
 
@@ -575,24 +598,85 @@ export class App {
   /** The controller at its index (identity checked), else found in the whole list. */
   async locate(link, id, priority, extra) {
     if (this.duplicates.has(id)) return undefined;
+    const fresh = this.verified.get(id);
+    if (
+      fresh &&
+      fresh.link === link &&
+      fresh.epoch === link.epoch &&
+      link.version >= 1 &&
+      this.monotonic() - fresh.at <= this.identityFresh()
+    ) {
+      return { index: fresh.index, c: fresh.c };
+    }
     const known = this.controllers.get(id)?.index ?? this.memory?.devices[id]?.index;
     if (known !== undefined) {
       const count = await this.readCount(link, priority, extra);
+      const epoch = link.epoch;
       if (known < count) {
         const c = await this.readController(link, known, priority, extra);
-        if (controllable(c) && controllerId(c) === id) return { index: known, c };
+        if (controllable(c) && controllerId(c) === id) {
+          this.verify(link, id, known, c, epoch);
+          return { index: known, c };
+        }
       }
     }
     const list = await this.readAll(link, priority, extra);
     return list.found.get(id);
   }
 
+  /** How long an identity read serves: until the next periodic read, plus a margin. */
+  identityFresh() {
+    return (this.config?.pollInterval ?? 0) * 1000 + TIMINGS.identityFresh;
+  }
+
+  /** An identity read: valid while the connection and the list stay the same. */
+  verify(link, id, index, c, epoch = link.epoch) {
+    this.verified.set(id, { index, c, epoch, at: this.monotonic(), link });
+  }
+
+  /**
+   * The turn of a command, given up at once when an Off of its target (any Off, for a
+   * profile) comes while it waits; a turn given up is passed on when it comes.
+   */
+  async takeTurn(target) {
+    const turn = this.turn();
+    const waiter = { target };
+    const off = new Promise((_, reject) => {
+      waiter.cancel = reject;
+    });
+    this.waiters.add(waiter);
+    try {
+      return await Promise.race([turn, off]);
+    } catch (err) {
+      turn.then((release) => release());
+      throw err;
+    } finally {
+      this.waiters.delete(waiter);
+    }
+  }
+
+  /** Commands one after the other: resolves with the release of the turn. */
+  turn() {
+    let release;
+    const mine = new Promise((resolve) => {
+      release = resolve;
+    });
+    const before = this.chain;
+    this.chain = before.then(() => mine);
+    return before.then(() => release);
+  }
+
   /** The read after a write, a moment later; undefined when it fails or is another controller. */
   async confirmRead(link, index, id, priority) {
     await new Promise((resolve) => this.timers.setTimeout(resolve, TIMINGS.confirm));
     try {
+      const epoch = link.epoch;
       const c = await this.readController(link, index, priority);
-      if (controllerId(c) !== id) return undefined;
+      if (controllerId(c) !== id) {
+        this.verified.delete(id);
+        return undefined;
+      }
+      this.verify(link, id, index, c, epoch);
       const entry = this.controllers.get(id);
       if (entry && link === this.link) entry.c = c;
       if (this.createdIds().has(id)) await this.publish(this.statesOf(id, c));
@@ -624,8 +708,17 @@ export class App {
   /** Off: never refused for an option, a read in progress or an unread configuration. */
   async off(id) {
     this.offSeq.set(id, (this.offSeq.get(id) ?? 0) + 1);
-    // What was asked before it never leaves after it.
-    this.link?.cancel((job) => job.target === id && job.priority !== PRIORITY.OFF);
+    this.offCount += 1;
+    // What was asked before it never leaves after it (a profile sets every controller).
+    this.link?.cancel(
+      (job) =>
+        (job.target === id || job.target === PROFILE_TARGET) && job.priority !== PRIORITY.OFF,
+    );
+    for (const waiter of this.waiters) {
+      if (waiter.target === id || waiter.target === PROFILE_TARGET) {
+        waiter.cancel(new LinkError('cancelled'));
+      }
+    }
     this.keepGuard(id);
     if (!this.link && this.memory?.address) {
       this.useAddress(addressOf(this.memory.address), this.memory.address);
@@ -692,8 +785,23 @@ export class App {
       flow.sent = true;
     };
     const run = async () => {
-      const at = await this.locate(link, id, PRIORITY.COMMAND, extra);
-      if (!at) throw this.refusal(ANSWERS.notFound);
+      const release = await this.takeTurn(id);
+      let at;
+      let check;
+      try {
+        if (!beforeSend()) throw new LinkError('cancelled');
+        at = await this.locate(link, id, PRIORITY.COMMAND, extra);
+        if (!at) throw this.refusal(ANSWERS.notFound);
+        check = await write(at);
+      } finally {
+        release();
+      }
+      if (typeof check === 'string') return check;
+      const after = await this.confirmRead(link, at.index, id, PRIORITY.COMMAND);
+      return this.text(after && check(after) ? ANSWERS.confirmed : ANSWERS.unconfirmed);
+    };
+    /** The writes; returns the check of the confirmation read, or the answer already. */
+    const write = async (at) => {
       const before = stateOf(at.c);
       let check;
       if (mode !== undefined) {
@@ -719,8 +827,7 @@ export class App {
         }
         check = (c) => showsColor(c, wanted);
       }
-      const after = await this.confirmRead(link, at.index, id, PRIORITY.COMMAND);
-      return this.text(after && check(after) ? ANSWERS.confirmed : ANSWERS.unconfirmed);
+      return check;
     };
     let result;
     try {
@@ -750,22 +857,37 @@ export class App {
     if (typeof value !== 'string' || value.trim() === '') throw this.refusal(ANSWERS.badValue);
     const name = value.trim();
     const flow = { sent: false, over: false };
+    // An Off asked after the profile wins: the profile never leaves after it.
+    const offs = this.offCount;
     const beforeSend = () =>
-      !flow.over && link === this.link && this.config?.allowProfiles === true;
+      !flow.over &&
+      this.offCount === offs &&
+      link === this.link &&
+      this.config?.allowProfiles === true;
     const run = async () => {
-      const profiles = await this.readProfiles(link, PRIORITY.COMMAND, { beforeSend });
-      if (!profiles) throw this.refusal(ANSWERS.oldServer);
-      const real = profiles.find((p) => shortName(p) === name);
-      if (real === undefined) throw this.refusal(ANSWERS.unknownProfile);
-      await link.request(P.loadProfile(real), {
-        priority: PRIORITY.COMMAND,
-        beforeSend,
-        sent: () => {
-          flow.sent = true;
-          // A profile loaded after an Off is a newer choice: the resends stop.
-          for (const guard of this.allGuards()) this.dropGuard(guard.id);
-        },
-      });
+      const release = await this.takeTurn(PROFILE_TARGET);
+      try {
+        if (!beforeSend()) throw new LinkError('cancelled');
+        const extra = { beforeSend, target: PROFILE_TARGET };
+        const profiles = await this.readProfiles(link, PRIORITY.COMMAND, extra);
+        if (!profiles) throw this.refusal(ANSWERS.oldServer);
+        const real = profiles.find((p) => shortName(p) === name);
+        if (real === undefined) throw this.refusal(ANSWERS.unknownProfile);
+        await link.request(P.loadProfile(real), {
+          ...extra,
+          priority: PRIORITY.COMMAND,
+          sent: () => {
+            flow.sent = true;
+            // A profile loaded after an Off is a newer choice: the resends of the Offs asked
+            // before it stop (none can be newer: beforeSend checked it).
+            for (const guard of this.allGuards()) {
+              if ((guard.offAt ?? 0) <= offs) this.dropGuard(guard.id);
+            }
+          },
+        });
+      } finally {
+        release();
+      }
       return this.text(ANSWERS.profileSent);
     };
     let result;
@@ -775,6 +897,7 @@ export class App {
       flow.over = true;
       if (err instanceof Refusal) throw err;
       if (flow.sent) return this.text(ANSWERS.profileSent);
+      if (err?.code === 'cancelled' || err?.code === 'cut') throw this.refusal(ANSWERS.cancelled);
       throw this.refusal(join(STATUS.unreachable, ANSWERS.nothingSent));
     }
     if (result === undefined) {

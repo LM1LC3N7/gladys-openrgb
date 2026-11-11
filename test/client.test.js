@@ -38,3 +38,30 @@ test('a held connection lets only the Offs leave until released', async () => {
   await read;
   link.close();
 });
+
+test('queued jobs leave by priority: an Off, then a command, then a read', async () => {
+  const world = fakeOpenRGB();
+  const clock = testClock({ start: 0 });
+  world.clock = clock;
+  world.latency = 100;
+  const link = new Link({ host: 'x', port: 1, transport: world.transport, ...clock });
+  const order = [];
+  const ask = (priority, name) =>
+    link
+      .request(P.requestControllerCount(), { expect: COMMANDS.REQUEST_CONTROLLER_COUNT, priority })
+      .then(() => order.push(name));
+  const all = Promise.all([
+    ask(PRIORITY.READ, 'first'),
+    ask(PRIORITY.READ, 'read'),
+    ask(PRIORITY.COMMAND, 'command'),
+    ask(PRIORITY.OFF, 'off'),
+  ]);
+  for (let i = 0; i < 200; i += 1) {
+    await clock.advance(10);
+    await settle(3);
+  }
+  await all;
+  // All queued while the connection opens: by priority, then in order.
+  assert.deepEqual(order, ['off', 'command', 'first', 'read']);
+  link.close();
+});

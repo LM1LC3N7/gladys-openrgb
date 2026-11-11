@@ -58,6 +58,18 @@ real OpenRGB (no package for Debian 13 on the VM, no RGB hardware).
   server device (`ext:<selector>:server:openrgb`, one per integration). The
   profile select publishes no state: OpenRGB does not tell the active profile.
   No `switch`. No brightness in v1.
+- **Identity reads shared, commands in turn** (review r1): an identity read
+  serves the writes on the same connection until the next periodic read plus
+  5 s, unless OpenRGB sends DEVICE_LIST_UPDATED (it does on a rescan; a moved
+  controller without that notice is the remaining risk, bounded by the
+  window). Commands and profile loads run one at a time up to their writes;
+  an Off cancels the waiting ones of its controller (any Off cancels a
+  profile). Measured on the fake: 5 colors set at 300, 500 and 900 ms per
+  answer; right after a list change, at 300 ms, 3 or more of 5.
+- **Off and profiles**: a profile load checks no Off came after it was asked
+  (global Off counter, before each request); once loaded it ends only the
+  resends of Offs asked before it. Offs in /data carry their wall time: older
+  than 10 minutes (or in the future) at a start, dropped.
 - **State**: per-LED mode: on when an LED is not black, color = the most
   frequent non-black color; a mode named Off: off; another mode: on, with its
   first mode color when it has one. Unknown otherwise (never 0).

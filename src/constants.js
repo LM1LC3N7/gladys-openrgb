@@ -76,10 +76,18 @@ export const TIMINGS = {
   command: 3000,
   /** An Off is tried again inside this budget (new connection) before being kept for later. */
   offRetry: 250,
+  /**
+   * An identity read on the same connection, with no DEVICE_LIST_UPDATED since, serves the
+   * writes that follow until the next periodic read plus this margin (a scene on several
+   * controllers is not one read each).
+   */
+  identityFresh: 5000,
   /** The read that confirms a command, after the write. */
   confirm: 300,
   /** Offs not shown by a read are sent again at the next reads, this many times. */
   offResends: 3,
+  /** An Off kept in /data is sent again at a start only this long after it was asked (wall). */
+  guardMaxAge: 10 * 60_000,
   /** Unreadable /data: read again on a timer of its own. */
   storeRetry: 10_000,
   storeWait: 2000,

@@ -31,7 +31,13 @@ test('the memory read back is repaired: bad ids, future dates, colors out of ran
         bad: { index: 1 },
         '0123456789ac': { index: -1, color: 0x1000000 },
       },
-      guards: [{ id: '0123456789ab', resends: 2 }, { id: '0123456789ab' }, { id: '../x' }],
+      guards: [
+        { id: '0123456789ac', resends: 1, at: now + 1000 },
+        { id: '0123456789ac', resends: 1, at: now - 11 * 60_000 },
+        { id: '0123456789ab', resends: 2, at: now - 60_000 },
+        { id: '0123456789ab', at: now },
+        { id: '../x', at: now },
+      ],
     },
     now,
   );
@@ -40,7 +46,8 @@ test('the memory read back is repaired: bad ids, future dates, colors out of ran
     '0123456789ab': { index: 3, color: 0x00ff00 },
     '0123456789ac': {},
   });
-  assert.deepEqual(memory.guards, [{ id: '0123456789ab', resends: 2 }]);
+  // A future or a 10-minute-old Off is dropped.
+  assert.deepEqual(memory.guards, [{ id: '0123456789ab', resends: 2, at: now - 60_000 }]);
   assert.equal(normalizeMemory({ address: 'http://x/y' }).address, undefined);
 });
 

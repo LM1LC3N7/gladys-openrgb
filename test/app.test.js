@@ -83,7 +83,10 @@ test('Off: black in direct mode, confirmed; not shown, kept and sent again 3 tim
   const answer = await t.cmd(F(ID, 'light'), 0);
   assert.equal(answer.success, true);
   assert.match(JSON.stringify(answer), /renvoyée aux prochaines lectures/);
-  assert.deepEqual(t.store.data.guards, [{ id: ID, resends: 0 }]);
+  assert.deepEqual(
+    t.store.data.guards.map((g) => [g.id, g.resends]),
+    [[ID, 0]],
+  );
   const sent = () => sentLeds(world).filter((p) => ledColor(p) === 0).length;
   assert.equal(sent(), 1);
   for (let i = 0; i < 5; i += 1) await t.wait(10 * SECOND);
@@ -115,7 +118,7 @@ test('Off from /data at start, without the configuration (getConfig fails)', asy
     format: 1,
     address: `${SERVER}:6742`,
     devices: { [ID]: { index: 0 } },
-    guards: [{ id: ID, resends: 0 }],
+    guards: [{ id: ID, resends: 0, at: START - 60_000 }],
   });
   const t = await setup({
     world,
@@ -159,6 +162,8 @@ test('an Off cancels the commands of the same controller still waiting', async (
   const world = fakeOpenRGB();
   const t = await setup({ world });
   await t.start();
+  // The identity read again (the list changed): the color waits for it.
+  world.push(encodePacket(COMMANDS.DEVICE_LIST_UPDATED, 0));
   world.latency = 400;
   const device = t.gladys.devices[0];
   const color = t.gladys.fake.setValue(device, { external_id: F(ID, 'color') }, 0x00ff00);
@@ -205,12 +210,22 @@ test('the identity is read before every write: a controller moved is written at 
   const world = fakeOpenRGB({ controllers: [controller(), other] });
   const t = await setup({ world, devices: [created(controller()), created(other)] });
   await t.start();
+  // OpenRGB tells its clients when its list changes.
   world.controllers.reverse();
+  world.push(encodePacket(COMMANDS.DEVICE_LIST_UPDATED, 0));
   await t.cmd(F(ID, 'color'), 0x0000ff);
   assert.equal(world.controllers[1].colors[0], 0x0000ff);
   assert.equal(world.controllers[0].colors[0], 0xff0000);
   assert.ok(sentLeds(world).every((p) => p.index === 1));
+  // Moved without a notice: an identity read serves an interval plus 5 s at most.
+  world.controllers.reverse();
+  // (the periodic read would refresh it: aged by hand)
+  t.app.verified.get(ID).at -= 15 * SECOND + 1;
+  await t.cmd(F(ID, 'color'), 0x00ffff);
+  assert.equal(world.controllers[0].colors[0], 0x00ffff);
+  world.controllers.reverse();
   // Gone from the server: nothing sent.
+  world.push(encodePacket(COMMANDS.DEVICE_LIST_UPDATED, 0));
   world.controllers.splice(1, 1);
   const before = sentLeds(world).length;
   const answer = await t.cmd(F(ID, 'color'), 0x00ff00);
@@ -248,8 +263,9 @@ test('modes: refused while the option is off (checked again before sending), app
   assert.equal(t.gladys.fake.lastState(F(ID, 'mode')), 'Rainbow Wave');
   answer = await t.cmd(F(ID, 'mode'), 'Nope');
   assert.equal(answer.success, false);
-  // The option unticked while the command waits: nothing leaves.
+  // The option unticked while the command waits (identity read): nothing leaves.
   t.world.latency = 300;
+  t.world.push(encodePacket(COMMANDS.DEVICE_LIST_UPDATED, 0));
   const pending = t.gladys.fake.setValue(
     t.gladys.devices[0],
     { external_id: F(ID, 'mode') },
@@ -410,6 +426,7 @@ test('a scene on 5 slow controllers sets all 5; one gone does not stop the other
   const t = await setup({ world, devices: controllers.map((c) => created(c)) });
   await t.start();
   world.latency = 120;
+  world.push(encodePacket(COMMANDS.DEVICE_LIST_UPDATED, 0));
   world.controllers.splice(5, 1);
   const devices = t.gladys.devices;
   const answers = await t.act(
@@ -523,6 +540,8 @@ test('a command answers within the budget when the server stops answering', asyn
   const world = fakeOpenRGB();
   const t = await setup({ world });
   await t.start();
+  // Not read since the list changed: the command has to read first.
+  world.push(encodePacket(COMMANDS.DEVICE_LIST_UPDATED, 0));
   world.silent = true;
   const started = t.clock.monotonic();
   const answer = await t.cmd(F(ID, 'color'), 0x0000ff);
@@ -575,6 +594,8 @@ test('an Off goes before the commands waiting; a queued command of its controlle
   const world = fakeOpenRGB({ controllers: [...controllers] });
   const t = await setup({ world, devices: controllers.map((c) => created(c)) });
   await t.start();
+  // The list changed: every command and the Off read the identity first.
+  world.push(encodePacket(COMMANDS.DEVICE_LIST_UPDATED, 0));
   world.latency = 200;
   // The connection is held for the Off while its requests leave.
   const held = [];
@@ -662,6 +683,7 @@ test('slow answers: the command still answers within its budget', async () => {
   const world = fakeOpenRGB();
   const t = await setup({ world });
   await t.start();
+  world.push(encodePacket(COMMANDS.DEVICE_LIST_UPDATED, 0));
   world.latency = 1400;
   const started = t.clock.monotonic();
   const answer = await t.cmd(F(ID, 'color'), 0x0000ff);
@@ -677,5 +699,135 @@ test('more controllers than the limit: refused as not OpenRGB, nothing published
   await t.start();
   assert.equal(t.status().connected, false);
   assert.match(t.status().message.en, /not as an OpenRGB SDK server/);
+  await t.app.shutdown();
+});
+
+test('profiles: the option is checked again just before the load leaves', async () => {
+  const world = fakeOpenRGB();
+  const t = await setup({ world, config: { server: SERVER, allow_profiles: true } });
+  await t.start();
+  world.latency = 300;
+  const pending = t.gladys.fake.setValue(t.gladys.devices[0], { external_id: PROFILE }, 'Night');
+  await t.wait(10);
+  t.app.config.allowProfiles = false;
+  const answer = await t.act(pending);
+  assert.equal(answer.success, false);
+  assert.equal(world.loaded, undefined);
+  assert.equal(world.sent(COMMANDS.LOAD_PROFILE).length, 0);
+  await t.app.shutdown();
+});
+
+test('an Off after a profile asked: the profile never leaves after it, the Off stays kept', async () => {
+  const world = fakeOpenRGB();
+  const t = await setup({ world, config: { server: SERVER, allow_profiles: true } });
+  await t.start();
+  world.latency = 300;
+  world.applyLeds = false;
+  const device = t.gladys.devices[0];
+  const profile = t.gladys.fake.setValue(device, { external_id: PROFILE }, 'Night');
+  await t.wait(100);
+  const off = t.gladys.fake.setValue(device, { external_id: F(ID, 'light') }, 0);
+  const [a, b] = await t.act(Promise.all([profile, off]));
+  assert.equal(a.success, false);
+  assert.match(JSON.stringify(a), /extinction est arrivée après/);
+  assert.equal(b.success, true);
+  assert.equal(world.sent(COMMANDS.LOAD_PROFILE).length, 0);
+  assert.deepEqual(
+    t.store.data.guards.map((g) => g.id),
+    [ID],
+  );
+  // A profile asked after the Off loads and ends its resends.
+  const again = await t.cmd(PROFILE, 'Night');
+  assert.equal(again.success, true);
+  assert.deepEqual(t.store.data.guards, []);
+  await t.app.shutdown();
+});
+
+for (const latency of [300, 500, 900]) {
+  test(`a scene of 5 colors with answers in ${latency} ms: all 5 set; 5 Offs too`, async () => {
+    const controllers = Array.from({ length: 5 }, (_, i) =>
+      controller({ name: `Strip ${i}`, location: `HID: ${i}` }),
+    );
+    const world = fakeOpenRGB({ controllers: [...controllers] });
+    const t = await setup({ world, devices: controllers.map((c) => created(c)) });
+    await t.start();
+    world.latency = latency;
+    // Between two periodic reads, as late as possible.
+    await t.wait(9 * SECOND);
+    const scene = (feature, value) =>
+      t.act(
+        Promise.all(
+          controllers.map((c, i) =>
+            t.gladys.fake.setValue(
+              t.gladys.devices[i],
+              { external_id: F(idOf(c), feature) },
+              value,
+            ),
+          ),
+        ),
+      );
+    let answers = await scene('color', 0x0000ff);
+    assert.deepEqual(
+      answers.map((a) => a.success),
+      [true, true, true, true, true],
+    );
+    for (const c of world.controllers) assert.equal(c.colors[0], 0x0000ff);
+    const started = t.clock.monotonic();
+    answers = await scene('light', 0);
+    assert.ok(t.clock.monotonic() - started <= 3500);
+    assert.ok(answers.every((a) => a.success));
+    // Every Off left before its ack.
+    for (const c of world.controllers) assert.equal(c.colors[0], 0);
+    await t.app.shutdown();
+  });
+}
+
+test('a scene right after the list changed (300 ms answers): the commands one after the other, never 0 set', async () => {
+  const controllers = Array.from({ length: 5 }, (_, i) =>
+    controller({ name: `Strip ${i}`, location: `HID: ${i}` }),
+  );
+  const world = fakeOpenRGB({ controllers: [...controllers] });
+  const t = await setup({ world, devices: controllers.map((c) => created(c)) });
+  await t.start();
+  world.latency = 300;
+  world.push(encodePacket(COMMANDS.DEVICE_LIST_UPDATED, 0));
+  const answers = await t.act(
+    Promise.all(
+      controllers.map((c, i) =>
+        t.gladys.fake.setValue(t.gladys.devices[i], { external_id: F(idOf(c), 'color') }, 0x0000ff),
+      ),
+    ),
+  );
+  // Each reads its identity (count, controller: 0.6 s) then writes, one after the other:
+  // the first ones are set within the budget (interleaved, none would be).
+  const set = world.controllers.filter((c) => c.colors[0] === 0x0000ff).length;
+  assert.ok(set >= 3, `${set} set`);
+  assert.equal(answers.filter((a) => a.success).length, set);
+  await t.app.shutdown();
+});
+
+test('an Off drops at once the queued request of a command already in its turn', async () => {
+  const world = fakeOpenRGB();
+  const t = await setup({ world });
+  await t.start();
+  world.latency = 300;
+  world.push(encodePacket(COMMANDS.DEVICE_LIST_UPDATED, 0));
+  // The periodic read starts at 10 s; the color's identity read queues behind it.
+  await t.wait(9 * SECOND + 50);
+  const device = t.gladys.devices[0];
+  const at = {};
+  const color = t.gladys.fake
+    .setValue(device, { external_id: F(ID, 'color') }, 0x00ff00)
+    .then((a) => {
+      at.color = t.clock.monotonic();
+      return a;
+    });
+  await t.wait(50);
+  const started = t.clock.monotonic();
+  const off = t.gladys.fake.setValue(device, { external_id: F(ID, 'light') }, 0);
+  const [a, b] = await t.act(Promise.all([color, off]));
+  assert.equal(a.success, false);
+  assert.equal(b.success, true);
+  assert.ok(at.color - started < 50, `${at.color - started} ms`);
   await t.app.shutdown();
 });

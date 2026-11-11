@@ -187,11 +187,14 @@ export function normalizeMemory(raw, now = Date.now()) {
     const seen = new Set();
     for (const entry of raw.guards.slice(0, LIMITS.guards)) {
       if (!plain(entry) || !isId(entry.id) || seen.has(entry.id)) continue;
+      // An Off asked long ago (or in the future) is not sent again at a start.
+      const at = time(entry.at);
+      if (at === undefined || at > now || now - at > TIMINGS.guardMaxAge) continue;
       seen.add(entry.id);
       const resends = Number.isInteger(entry.resends)
         ? Math.min(Math.max(entry.resends, 0), 99)
         : 0;
-      memory.guards.push({ id: entry.id, resends });
+      memory.guards.push({ id: entry.id, resends, at });
     }
   }
   return memory;

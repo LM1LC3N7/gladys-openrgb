@@ -65,7 +65,13 @@ détection. Un appareil est donc lié à son contrôleur par une empreinte du
 fabricant, du nom et du numéro de série (ou, sans numéro de série, de
 l’emplacement qu’OpenRGB affiche : bus et adresse). Avant chaque écriture, le
 contrôleur est relu à son numéro ; si ce n’est plus lui, toute la liste est
-relue pour le retrouver ; s’il n’y est plus : « rien envoyé ».
+relue pour le retrouver ; s’il n’y est plus : « rien envoyé ». Une lecture sert
+aux écritures qui suivent sur la même connexion jusqu’à la lecture périodique
+suivante (plus 5 s), tant qu’OpenRGB ne signale pas que sa liste a changé : une
+scène sur plusieurs contrôleurs part sans une lecture par contrôleur. Les
+commandes passent l’une après l’autre (jamais entremêlées) ; juste après un
+changement de liste, sur un serveur lent, les dernières d’une scène peuvent
+répondre « rien envoyé ».
 
 Un appareil USB rebranché sur un autre port, sans numéro de série, peut donc
 apparaître comme un nouvel appareil dans la Découverte.
@@ -81,7 +87,9 @@ configuration soit lue (l’adresse gardée dans `/data` sert).
 Si la lecture qui suit ne montre pas le contrôleur éteint, l’extinction est
 gardée (dans `/data`) et renvoyée par les lectures suivantes, 3 fois au plus.
 Une commande plus récente partie vers ce contrôleur (allumer, couleur, mode)
-ou un profil chargé arrêtent ces renvois.
+ou un profil demandé après l’extinction et chargé arrêtent ces renvois. Un
+profil demandé avant une extinction ne part plus après elle. Au démarrage, une
+extinction gardée n’est renvoyée que si elle date de moins de 10 minutes.
 
 Une extinction est refusée seulement quand le contrôleur n’est plus sur le
 serveur (ou y est en double, sans numéro de série). Si le serveur ne répond pas, elle est gardée et envoyée aux lectures

@@ -63,7 +63,12 @@ again. A device is therefore tied to its controller by a fingerprint of the
 vendor, the name and the serial (or, without a serial, of the location OpenRGB
 shows: bus and address). Before every write, the controller is read at its
 number; if it is not that one anymore, the whole list is read to find it; if
-it is gone: "nothing sent".
+it is gone: "nothing sent". A read serves the writes that follow on the same
+connection until the next periodic read (plus 5 s), as long as OpenRGB does not
+say its list changed: a scene on several controllers leaves without one read
+per controller. Commands go one after the other (never interleaved); right
+after a list change, on a slow server, the last ones of a scene may answer
+"nothing sent".
 
 A USB device without a serial plugged into another port may thus show up as a
 new device in Discover.
@@ -77,8 +82,10 @@ before the configuration is read (the address kept in `/data` serves).
 
 When the read that follows does not show the controller off, the Off is kept
 (in `/data`) and sent again by the next reads, 3 times at most. A newer
-command that left for that controller (on, color, mode) or a profile loaded
-stops these resends.
+command that left for that controller (on, color, mode) or a profile asked
+after the Off and loaded stops these resends. A profile asked before an Off
+never leaves after it. At a start, a kept Off is sent again only when it is
+less than 10 minutes old.
 
 An Off is refused only when the controller is no longer on the server (or is
 there twice, without a serial). When
